@@ -2,60 +2,71 @@ name: GitHub Classroom Workflow
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
     branches:
-      - master
+      - main
 jobs:
   build:
     name: Autograding
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        shell: bash --noprofile --norc -Eeuxo pipefail {0}
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (builder stage)
+        uses: docker/build-push-action@v6
         with:
-          fetch-depth: 0
+          context: .
+          target: unit-tests
+          load: true
+          tags: unittests:latest
 
-      - uses: docker/setup-buildx-action@v2
+      - name: Run pytest tests
+        run: |
+          docker run --rm unittests:latest
 
-      # TODO build and run unit tests
+      - name: Build Docker image (production stage)
+        run: |
+          docker compose build
 
-      - name: Build images
-        timeout-minutes: 10
-        run: docker compose build
+      - name: Run services
+        run: |
+          docker compose up --detach
 
-      - name: Run containers
+      - name: Wait for services to start
         timeout-minutes: 5
         run: |
-          docker compose up -d
           ./scripts/wait-script.sh
         env:
           WAIT_PORTS: 8080,8070,8060,8050
 
-      # TODO setup variant, service and port
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+
+      - name: Install Newman
+        run: npm install -g newman
 
       - name: Run API Tests
         timeout-minutes: 5
         run: ./scripts/test-script.sh
         env:
-          VARIANT: <variant>
-          SERVICE_NAME: <your service name>
-          PORT_NUMBER: <port number>
-
-      - uses: education/autograding@v1
-        id: autograder
-        continue-on-error: true
-
-      - name: Github auto grader mark
-        uses: Romanow/google-sheet-autograder-marker@v1.0
-        with:
-          google_token: ${{secrets.GOOGLE_API_KEY}}
-          sheet_id: "1xkgjUX6Qmk7rdJG-QPOToav-HWWtthJjnShIKnw3oIY"
-          homework_number: 3
-          user_column: 'D'
-          column_offset: 'F'
-          mark: "'+"
+          VARIANT: v4
+          SERVICE_NAME: rating_service
+          PORT_NUMBER: 8050
 
       - name: Stop containers
         if: always()
         continue-on-error: true
-        run: docker compose down -v
+        run: docker compose down --volumes
